@@ -40,7 +40,7 @@
 <body>
 <div class="wrap">
   <h1><span>PREDICT</span> 空投计算器</h1>
-  <div class="sub">本周积分 → 代币数量 → U 价值 · 价格来自币安合约 PREDICTUSDT · <span id="status" class="muted">加载中…</span></div>
+  <div class="sub">总积分 → 代币数量 → U 价值 · 价格来自币安合约 PREDICTUSDT · <span id="status" class="muted">加载中…</span></div>
 
   <div class="card">
     <h2>每 1 积分能领多少</h2>
@@ -48,10 +48,10 @@
       <div class="stat"><div class="k">每积分 代币总量</div><div class="v accent" id="perPoint">-</div><div class="s" id="perPointUsd">-</div></div>
       <div class="stat"><div class="k">每积分 开盘解锁</div><div class="v" id="perPointUnlock">-</div><div class="s" id="perPointUnlockUsd">-</div></div>
       <div class="stat"><div class="k">PREDICT 价格</div><div class="v" id="price">-</div><div class="s" id="priceSrc">-</div></div>
-      <div class="stat"><div class="k">每 1 万积分</div><div class="v" id="per10k">-</div><div class="s" id="per10kUsd">-</div></div>
+      <div class="stat"><div class="k">每 100 万积分</div><div class="v" id="per10k">-</div><div class="s" id="per10kUsd">-</div></div>
     </div>
     <div class="grid" style="margin-top:14px">
-      <div><label>本周全网积分（allocationRoundPoints 合计）</label><input id="pTotal" type="number"></div>
+      <div><label>全网总积分</label><input id="pTotal" type="number"></div>
       <div><label>空投总量（枚）</label><input id="pAirdrop" type="number"></div>
       <div><label>开盘解锁比例 %</label><input id="pUnlock" type="number"></div>
       <div><label>价格 USDT（留空 = 实时）</label><input id="pPrice" type="number" step="any" placeholder="实时"></div>
@@ -79,7 +79,7 @@
   <div class="card">
     <h2>积分榜 <button class="tab on" data-sort="week">周榜</button><button class="tab" data-sort="total">总榜</button> <span class="pill" id="boardNote"></span></h2>
     <div class="row"><input id="q" class="mono" placeholder="搜索地址 / 用户名"></div>
-    <div class="scroll" style="margin-top:10px"><table id="board"><thead><tr><th class="l">周排名</th><th class="l">总排名</th><th class="l">用户</th><th>本周积分</th><th>总积分</th><th>本周占比</th><th>可领代币</th><th>开盘解锁</th><th>价值 U</th><th>解锁价值 U</th></tr></thead><tbody></tbody></table></div>
+    <div class="scroll" style="margin-top:10px"><table id="board"><thead><tr><th class="l">周排名</th><th class="l">总排名</th><th class="l">用户</th><th>本周积分</th><th>总积分</th><th>占全网</th><th>可领代币</th><th>开盘解锁</th><th>价值 U</th><th>解锁价值 U</th></tr></thead><tbody></tbody></table></div>
     <div class="pager"><span class="muted" id="pageInfo"></span><button class="ghost" id="prev">上一页</button><button class="ghost" id="next">下一页</button></div>
   </div>
 </div>
@@ -112,8 +112,8 @@ function renderEconomics() {
   $('perPointUnlockUsd').textContent = p.price ? '≈ ' + usd(p.perPoint * p.unlock * p.price) + ' / 积分' : '无价格';
   $('price').textContent = p.price ? '$' + fmt(p.price, 5) : '-';
   $('priceSrc').textContent = $('pPrice').value !== '' ? '手动价格' : (S.price.value ? S.price.source + ' · ' + new Date(S.price.updatedAt).toLocaleTimeString() : (S.price.error || '获取失败'));
-  $('per10k').textContent = fmt(p.perPoint * 1e4, 0) + ' 枚';
-  $('per10kUsd').textContent = p.price ? '≈ ' + usd(p.perPoint * 1e4 * p.price) + '（解锁 ' + usd(p.perPoint * 1e4 * p.unlock * p.price) + '）' : '';
+  $('per10k').textContent = fmt(p.perPoint * 1e6, 0) + ' 枚';
+  $('per10kUsd').textContent = p.price ? '≈ ' + usd(p.perPoint * 1e6 * p.price) + '（解锁 ' + usd(p.perPoint * 1e6 * p.unlock * p.price) + '）' : '';
   renderRounds(); renderBoard(lastRows); rerenderResult();
 }
 
@@ -135,7 +135,7 @@ function rerenderResult() {
   let html = `
     ${meta ? `<div class="muted" style="margin-bottom:8px">${meta}</div>` : ''}
     <div class="grid">
-      <div class="stat"><div class="k">本周积分</div><div class="v">${fmt(points, 2)}</div><div class="s">占本周全网 ${fmt(c.share * 100, 4)}%</div></div>
+      <div class="stat"><div class="k">总积分</div><div class="v">${fmt(points, 2)}</div><div class="s">占全网 ${fmt(c.share * 100, 4)}%</div></div>
       <div class="stat"><div class="k">可领代币总量</div><div class="v accent">${fmt(c.tokens, 2)}</div><div class="s">≈ ${usd(c.usd)}</div></div>
       <div class="stat"><div class="k">开盘解锁 ${fmt(params().unlock * 100, 0)}%</div><div class="v ok">${fmt(c.unlocked, 2)}</div><div class="s">≈ ${usd(c.unlockedUsd)}</div></div>
       <div class="stat"><div class="k">锁仓部分</div><div class="v">${fmt(c.tokens - c.unlocked, 2)}</div><div class="s">≈ ${usd(c.usd == null ? null : c.usd - c.unlockedUsd)}</div></div>
@@ -144,7 +144,7 @@ function rerenderResult() {
     const w = user.weekly.filter((x) => x.points > 0 || x.referral > 0).reverse();
     const max = Math.max(...w.map((x) => x.points), 1);
     html += `<h2 style="margin-top:18px">每周积分 <span class="pill">${w.length} 周有积分 · 累计 ${fmt(user.weekly.reduce((s, x) => s + x.points, 0), 0)}</span></h2>
-      <div class="scroll"><table><thead><tr><th class="l">周</th><th>积分</th><th>其中邀请</th><th class="l" style="width:35%"></th><th>按当前比例≈代币</th><th>≈ U</th></tr></thead><tbody>
+      <div class="scroll"><table><thead><tr><th class="l">周</th><th>积分</th><th>其中邀请</th><th class="l" style="width:35%"></th><th>该周新增≈代币</th><th>≈ U</th></tr></thead><tbody>
       ${w.map((x) => { const k = calc(x.points); return `<tr><td>第 ${x.week} 周${x.calculated ? '' : ' <span class="pill">统计中</span>'}</td><td>${fmt(x.points, 2)}</td><td>${fmt(x.referral, 2)}</td><td class="l"><div class="bar" style="width:${(x.points / max * 100).toFixed(1)}%"></div></td><td>${fmt(k.tokens, 0)}</td><td>${usd(k.usd)}</td></tr>`; }).join('')}
       </tbody></table></div>`;
   }
@@ -159,8 +159,8 @@ async function lookup() {
   const j = await r.json();
   if (!r.ok) { $('result').innerHTML = `<span class="err">${j.error}</span>`; return; }
   const who = `${j.name ? '<b>' + esc(j.name) + '</b> · ' : ''}<span class="mono">${j.displayAddress || j.address}</span>${j.twitter ? ' · @' + esc(j.twitter) : ''}`;
-  const ranks = `总榜 #${j.rank ?? '-'}${chg(j.rankChange)} · 总积分 ${fmt(j.totalPoints, 0)}${j.weekRank ? ' · 周榜 #' + j.weekRank + '（缓存内）' : ''}${j.source === 'cache' ? ' · <span class="err">实时查询失败，显示缓存</span>' : ''}`;
-  showResult(j.weekPoints, who + '<br>' + ranks, j);
+  const ranks = `总榜 #${j.rank ?? '-'}${chg(j.rankChange)} · 本周积分 ${fmt(j.weekPoints, 2)}${j.weekRank ? ' · 周榜 #' + j.weekRank + '（缓存内）' : ''}${j.source === 'cache' ? ' · <span class="err">实时查询失败，显示缓存</span>' : ''}`;
+  showResult(j.totalPoints, who + '<br>' + ranks, j);
 }
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -175,14 +175,14 @@ async function loadBoard() {
 function renderBoard(rows) {
   const tb = $('board').tBodies[0];
   if (!rows.length) { tb.innerHTML = `<tr><td colspan="10" class="muted">${S && S.leaderboard.error ? '<span class="err">' + esc(S.leaderboard.error) + '</span>' : (S && S.leaderboard.refreshing ? '正在抓取积分榜…' : '暂无数据')}</td></tr>`; return; }
-  tb.innerHTML = rows.map((x) => { const c = calc(x.weekPoints); return `<tr><td>#${x.weekRank}</td><td class="l">#${x.rank ?? '-'}${chg(x.rankChange)}</td><td class="l mono" title="${x.address}"><a href="#" data-a="${x.address}" style="color:inherit">${x.name ? esc(x.name) + ' · ' : ''}${short(x.address)}</a></td><td>${fmt(x.weekPoints, 0)}</td><td class="muted">${fmt(x.totalPoints, 0)}</td><td>${fmt(c.share * 100, 4)}%</td><td>${fmt(c.tokens, 0)}</td><td>${fmt(c.unlocked, 0)}</td><td>${usd(c.usd)}</td><td>${usd(c.unlockedUsd)}</td></tr>`; }).join('');
+  tb.innerHTML = rows.map((x) => { const c = calc(x.totalPoints); return `<tr><td>#${x.weekRank}</td><td class="l">#${x.rank ?? '-'}${chg(x.rankChange)}</td><td class="l mono" title="${x.address}"><a href="#" data-a="${x.address}" style="color:inherit">${x.name ? esc(x.name) + ' · ' : ''}${short(x.address)}</a></td><td>${fmt(x.weekPoints, 0)}</td><td>${fmt(x.totalPoints, 0)}</td><td>${fmt(c.share * 100, 4)}%</td><td>${fmt(c.tokens, 0)}</td><td>${fmt(c.unlocked, 0)}</td><td>${usd(c.usd)}</td><td>${usd(c.unlockedUsd)}</td></tr>`; }).join('');
 }
 
 async function loadSummary() {
   const r = await fetch('/api/summary'); S = await r.json();
   const lb = S.leaderboard;
   $('status').innerHTML = lb.refreshing ? '积分榜抓取中…' : lb.error ? `<span class="err">积分榜：${lb.error}</span>` : `积分榜缓存 ${lb.count} 条 · 更新于 ${lb.updatedAt ? new Date(lb.updatedAt).toLocaleString() : '-'}`;
-  $('boardNote').textContent = lb.count ? `缓存总榜前 ${lb.count} 名 · 其本周积分合计 ${fmt(lb.cachedWeekPointsSum, 0)}` : '';
+  $('boardNote').textContent = lb.count ? `缓存前 ${lb.count} 名 · 总积分合计 ${fmt(lb.cachedTotalPointsSum, 0)} · 本周积分合计 ${fmt(lb.cachedWeekPointsSum, 0)}` : '';
   for (const [id, v] of [['pTotal', S.economics.totalPoints], ['pAirdrop', S.economics.airdropTokens], ['pUnlock', S.economics.unlockRatio * 100]]) if ($(id).value === '') $(id).placeholder = v;
   renderEconomics();
 }

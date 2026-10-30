@@ -5,7 +5,7 @@ module.exports = {
   PORT: Number(env('PORT', 3000)),
 
   // ---- 空投参数 ----
-  TOTAL_POINTS: Number(env('TOTAL_POINTS', 4_680_000)),   // 本轮（本周）全网 allocationRoundPoints 合计 4.68M
+  TOTAL_POINTS: Number(env('TOTAL_POINTS', 468_000_000)), // 全网总积分 4.68 亿（totalPoints 合计）
   AIRDROP_TOKENS: Number(env('AIRDROP_TOKENS', 70_000_000)), // 空投总量 7000 万
   UNLOCK_RATIO: Number(env('UNLOCK_RATIO', 0.35)),          // 开盘解锁 35%
 

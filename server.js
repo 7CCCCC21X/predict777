@@ -112,8 +112,8 @@ function normalizeRow(n) {
     imageUrl: acc.imageStatus === 'PUBLIC' ? acc.imageUrl || null : null,
     rank: n.rank != null ? toNum(n.rank) : null,       // 总榜排名（官方）
     rankChange: n.rankChange != null ? toNum(n.rankChange) : 0,
-    totalPoints: toNum(n.totalPoints),
-    weekPoints: toNum(n.allocationRoundPoints),          // 本轮（本周）积分 → 用来算空投
+    totalPoints: toNum(n.totalPoints),                   // 总积分 → 用来算空投
+    weekPoints: toNum(n.allocationRoundPoints),          // 本轮（本周）积分
   };
 }
 
@@ -260,6 +260,7 @@ const server = http.createServer(async (req, res) => {
           refreshing: board.refreshing,
           error: board.error,
           cachedWeekPointsSum: board.rows.reduce((s, r) => s + r.weekPoints, 0),
+          cachedTotalPointsSum: board.rows.reduce((s, r) => s + r.totalPoints, 0),
         },
       });
     }
@@ -277,7 +278,7 @@ const server = http.createServer(async (req, res) => {
         ...user,
         weekRank: cached ? cached.weekRank : null,
         source,
-        ...calc(user.weekPoints, economics(), p),
+        ...calc(user.totalPoints, economics(), p),
         price: p,
       });
     }
@@ -294,7 +295,7 @@ const server = http.createServer(async (req, res) => {
         total: list.length,
         page,
         size,
-        rows: list.slice(page * size, page * size + size).map((r) => ({ ...r, ...calc(r.weekPoints, eco, p) })),
+        rows: list.slice(page * size, page * size + size).map((r) => ({ ...r, ...calc(r.totalPoints, eco, p) })),
       });
     }
 
