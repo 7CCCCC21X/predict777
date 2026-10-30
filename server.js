@@ -93,50 +93,28 @@ async function getPrice() {
 }
 
 // ---------------- 积分榜（前 N 名缓存） ----------------
-let board = { rows: [], byAddress: new Map(), updatedAt: null, refreshing: false, error: null };
+let board = { rows: [], byWeek: [], byAddress: new Map(), updatedAt: null, refreshing: false, error: null };
 
 function toNum(v) {
   const n = typeof v === 'string' ? Number(v.replace(/,/g, '')) : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-// 在响应里找“最像榜单”的数组（兼容 list / items / edges{node} 等各种结构）
-function findRows(obj) {
-  let best = null;
-  let pageInfo = null;
-  (function walk(o) {
-    if (!o || typeof o !== 'object') return;
-    if (Array.isArray(o)) {
-      if (o.length && typeof o[0] === 'object' && (!best || o.length > best.length)) best = o;
-      o.forEach(walk);
-      return;
-    }
-    if (o.pageInfo && !pageInfo) pageInfo = o.pageInfo;
-    Object.values(o).forEach(walk);
-  })(obj);
-  return { rows: (best || []).map((r) => (r && r.node ? r.node : r)), pageInfo };
-}
-
-function flatten(o, prefix = '', out = {}) {
-  for (const [k, v] of Object.entries(o || {})) {
-    const key = prefix ? `${prefix}.${k}` : k;
-    if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, key, out);
-    else out[key] = v;
-  }
-  return out;
-}
-
-function normalizeRow(raw) {
-  const f = flatten(raw);
-  let address = null, points = null, rank = null, name = null;
-  for (const [k, v] of Object.entries(f)) {
-    const leaf = k.split('.').pop().toLowerCase();
-    if (!address && typeof v === 'string' && /^0x[0-9a-fA-F]{40}$/.test(v)) address = v;
-    if (points === null && /(points|point|score|totalpoints)$/.test(leaf) && v !== null && v !== '') points = toNum(v);
-    if (rank === null && /rank|position/.test(leaf)) rank = toNum(v);
-    if (!name && /(username|name|handle)$/.test(leaf) && typeof v === 'string') name = v;
-  }
-  return address ? { address: address.toLowerCase(), points: points || 0, rank, name } : null;
+// 官网结构：leaderboard.edges[].node.{rank,rankChange,totalPoints,allocationRoundPoints,account{...}}
+function normalizeRow(n) {
+  const acc = n.account || n;
+  if (!acc.address) return null;
+  return {
+    address: acc.address.toLowerCase(),
+    displayAddress: acc.address,
+    name: acc.name || null,
+    twitter: acc.twitterUsername || null,
+    imageUrl: acc.imageStatus === 'PUBLIC' ? acc.imageUrl || null : null,
+    rank: n.rank != null ? toNum(n.rank) : null,       // 总榜排名（官方）
+    rankChange: n.rankChange != null ? toNum(n.rankChange) : 0,
+    totalPoints: toNum(n.totalPoints),
+    weekPoints: toNum(n.allocationRoundPoints),          // 本轮（本周）积分 → 用来算空投
+  };
 }
 
 async function refreshLeaderboard() {
@@ -150,28 +128,21 @@ async function refreshLeaderboard() {
     for (let page = 0; rows.length < cfg.LEADERBOARD_LIMIT; page++) {
       const vars = cfg.leaderboardVariables({ page, pageSize: cfg.PAGE_SIZE, cursor, seasonId: cfg.SEASON_ID });
       const data = await gql(cfg.LEADERBOARD_QUERY, vars);
-      const { rows: raw, pageInfo } = findRows(data);
+      const lb = data && data.leaderboard;
+      const edges = (lb && (lb.edges || lb.items || lb.list)) || [];
       let added = 0;
-      for (const r of raw) {
-        const n = normalizeRow(r);
-        if (n && !seen.has(n.address)) {
-          seen.add(n.address);
-          rows.push(n);
-          added++;
-        }
+      for (const e of edges) {
+        const n = normalizeRow(e.node || e);
+        if (n && !seen.has(n.address)) { seen.add(n.address); rows.push(n); added++; }
       }
-      if (!added) break; // 没有新数据（到底了，或接口不支持分页）
-      if (pageInfo) {
-        if (pageInfo.hasNextPage === false || !pageInfo.endCursor) break;
-        cursor = pageInfo.endCursor;
-      }
-      if (page % 10 === 0) console.log(`[leaderboard] 已抓取 ${rows.length} 条`);
+      const pi = lb && lb.pageInfo;
+      if (!added || !pi || !pi.hasNextPage || !pi.endCursor) break;
+      cursor = pi.endCursor;
+      if (page % 20 === 0) console.log(`[leaderboard] 已抓取 ${rows.length} 条`);
       await sleep(cfg.REQUEST_DELAY_MS);
     }
     if (!rows.length) throw new Error('积分榜查询没有返回任何地址，请检查 config.js 里的 LEADERBOARD_QUERY');
-    rows.sort((a, b) => b.points - a.points);
     rows.length = Math.min(rows.length, cfg.LEADERBOARD_LIMIT);
-    rows.forEach((r, i) => { if (!r.rank) r.rank = i + 1; });
     setBoard(rows, Date.now());
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(CACHE_FILE, JSON.stringify({ updatedAt: board.updatedAt, rows }));
@@ -186,7 +157,10 @@ async function refreshLeaderboard() {
 }
 
 function setBoard(rows, updatedAt) {
+  // 周榜排名：缓存内按本周积分排序（只覆盖总榜前 N 名里的人）
+  [...rows].sort((a, b) => b.weekPoints - a.weekPoints).forEach((r, i) => { r.weekRank = i + 1; });
   board.rows = rows;
+  board.byWeek = [...rows].sort((a, b) => a.weekRank - b.weekRank);
   board.byAddress = new Map(rows.map((r) => [r.address, r]));
   board.updatedAt = updatedAt;
 }
@@ -194,9 +168,50 @@ function setBoard(rows, updatedAt) {
 function loadCache() {
   try {
     const j = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-    setBoard(j.rows || [], j.updatedAt);
+    if ((j.rows || [])[0] && 'weekPoints' in j.rows[0]) setBoard(j.rows, j.updatedAt);
     console.log(`[leaderboard] 从缓存载入 ${board.rows.length} 条`);
   } catch (_) {}
+}
+
+// ---------------- 单地址实时查询（含每周积分） ----------------
+const USER_QUERY = `query GetLeaderboardUserStats($address: Address!, $seasonId: Int) {
+  account(address: $address) {
+    name
+    address
+    imageUrl
+    imageStatus
+    twitterUsername
+    leaderboard(seasonId: $seasonId) {
+      allocationRoundPoints
+      totalPoints
+      rank
+      rankChange
+    }
+    weeklyPointsHistory(seasonId: $seasonId) {
+      week
+      totalPoints
+      referralPoints
+      calculated
+    }
+  }
+}`;
+const userCache = new Map(); // address -> { at, data }
+
+async function fetchUser(address) {
+  const hit = userCache.get(address);
+  if (hit && Date.now() - hit.at < 60_000) return hit.data;
+  const data = await gql(USER_QUERY, { address, seasonId: cfg.SEASON_ID }, 'GetLeaderboardUserStats');
+  const acc = data && data.account;
+  let user = null;
+  if (acc) {
+    user = normalizeRow({ ...(acc.leaderboard || {}), account: acc });
+    user.weekly = (acc.weeklyPointsHistory || [])
+      .map((w) => ({ week: toNum(w.week), points: toNum(w.totalPoints), referral: toNum(w.referralPoints), calculated: !!w.calculated }))
+      .sort((a, b) => a.week - b.week);
+  }
+  if (userCache.size > 5000) userCache.clear();
+  userCache.set(address, { at: Date.now(), data: user });
+  return user;
 }
 
 // ---------------- 计算 ----------------
@@ -244,7 +259,7 @@ const server = http.createServer(async (req, res) => {
           updatedAt: board.updatedAt,
           refreshing: board.refreshing,
           error: board.error,
-          cachedPointsSum: board.rows.reduce((s, r) => s + r.points, 0),
+          cachedWeekPointsSum: board.rows.reduce((s, r) => s + r.weekPoints, 0),
         },
       });
     }
@@ -252,25 +267,34 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/lookup') {
       const address = (url.searchParams.get('address') || '').trim().toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(address)) return send(res, 400, { error: '地址格式不正确' });
-      const row = board.byAddress.get(address);
+      const cached = board.byAddress.get(address);
+      let user = null, source = 'live', liveError = null;
+      try { user = await fetchUser(address); } catch (e) { liveError = e.message; }
+      if (!user && cached) { user = cached; source = 'cache'; }
+      if (!user) return send(res, 404, { error: liveError ? `实时查询失败（${liveError}），且该地址不在缓存中` : '该地址没有积分记录' });
       const p = (await getPrice()).value;
-      const eco = economics();
-      if (!row) return send(res, 404, { error: `该地址不在积分榜前 ${board.rows.length} 名缓存中，可在下方手动输入积分计算`, address });
-      return send(res, 200, { ...row, ...calc(row.points, eco, p), price: p });
+      return send(res, 200, {
+        ...user,
+        weekRank: cached ? cached.weekRank : null,
+        source,
+        ...calc(user.weekPoints, economics(), p),
+        price: p,
+      });
     }
 
     if (url.pathname === '/api/leaderboard') {
       const page = Math.max(0, Number(url.searchParams.get('page')) || 0);
       const size = Math.min(200, Math.max(1, Number(url.searchParams.get('size')) || 50));
       const q = (url.searchParams.get('q') || '').toLowerCase();
-      const list = q ? board.rows.filter((r) => r.address.includes(q) || (r.name || '').toLowerCase().includes(q)) : board.rows;
+      const base = url.searchParams.get('sort') === 'total' ? board.rows : board.byWeek;
+      const list = q ? base.filter((r) => r.address.includes(q) || (r.name || '').toLowerCase().includes(q)) : base;
       const p = price.value;
       const eco = economics();
       return send(res, 200, {
         total: list.length,
         page,
         size,
-        rows: list.slice(page * size, page * size + size).map((r) => ({ ...r, ...calc(r.points, eco, p) })),
+        rows: list.slice(page * size, page * size + size).map((r) => ({ ...r, ...calc(r.weekPoints, eco, p) })),
       });
     }
 

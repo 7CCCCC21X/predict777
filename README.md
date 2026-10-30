@@ -1,6 +1,9 @@
 # PREDICT 空投计算器
 
-积分 → 代币数量 → U 价值。后台定时缓存 predict.fun 积分榜前 1 万名，前端输入地址秒查；价格取币安合约 `PREDICTUSDT`。
+本周积分 → 代币数量 → U 价值。后台定时缓存 predict.fun 积分榜前 1 万名（周榜/总榜），地址查询走官方 `GetLeaderboardUserStats` 实时接口（含每周积分历史）；价格取币安合约 `PREDICTUSDT`。
+
+> 4.68M 指**本轮（本周）全网 `allocationRoundPoints` 合计**（总榜第 1 名 totalPoints 就超过 1000 万，所以不可能是总积分）。
+> 因此代币 = 本周积分 `allocationRoundPoints` × 70,000,000 / 4,680,000。
 
 ## 每 1 积分能领多少
 
@@ -23,12 +26,12 @@ set HTTPS_PROXY=http://127.0.0.1:7897 && npm start    # Windows cmd
 
 打开 http://localhost:3000
 
-## ⚠️ 需要你确认一下积分榜查询
+## ⚠️ 积分榜查询的参数名需要确认
 
-`GetAllocationRounds` 已按你给的请求接好。**积分榜的 GraphQL 查询我拿不到原文**，`config.js` 里的
-`LEADERBOARD_QUERY` 是猜的。请在 predict.fun 积分榜页面 DevTools → Network 找到查榜单的 graphql 请求，
-把 `query` 粘到 `LEADERBOARD_QUERY`，分页变量填到 `leaderboardVariables`。
-返回结构不用改代码：程序会自动找到榜单数组、识别地址/积分/排名字段，有 `pageInfo.endCursor` 就自动走游标翻页。
+- 地址查询（`GetLeaderboardUserStats`）、分配轮次（`GetAllocationRounds`）用的是官网原始语句。
+- 积分榜返回结构已按官网实际响应对齐，但 `config.js` 里 `leaderboard(seasonId, first, after)` 的**参数名是猜的**。
+  启动日志如果报 `[leaderboard] ...` 错误，请把官网榜单请求的 `query` 粘到 `LEADERBOARD_QUERY`，按变量名改 `leaderboardVariables`。
+- 周榜排名是在缓存的总榜前 1 万名内按本周积分排序得出的。总榜 1 万名之外、但本周积分很高的人不会出现在周榜里（查地址不受影响）。
 
 缓存写在 `data/leaderboard.json`，重启直接加载，每 30 分钟刷新（`REFRESH_MINUTES`）。
 

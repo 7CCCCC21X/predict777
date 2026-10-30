@@ -30,13 +30,17 @@
   .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
   #result { margin-top:14px; }
   .pager { display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:10px; }
+  .tab { background:transparent; color:var(--muted); border:1px solid var(--line); padding:4px 12px; font-size:13px; margin-left:6px; }
+  .tab.on { background:var(--accent); color:#000; border-color:var(--accent); }
+  .up { color:var(--green); } .down { color:var(--red); }
+  .bar { height:6px; background:var(--accent); border-radius:3px; min-width:1px; }
   .pill { display:inline-block; padding:2px 8px; border-radius:99px; background:#21262d; color:var(--muted); font-size:12px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1><span>PREDICT</span> 空投计算器</h1>
-  <div class="sub">积分 → 代币数量 → U 价值 · 价格来自币安合约 PREDICTUSDT · <span id="status" class="muted">加载中…</span></div>
+  <div class="sub">本周积分 → 代币数量 → U 价值 · 价格来自币安合约 PREDICTUSDT · <span id="status" class="muted">加载中…</span></div>
 
   <div class="card">
     <h2>每 1 积分能领多少</h2>
@@ -47,7 +51,7 @@
       <div class="stat"><div class="k">每 1 万积分</div><div class="v" id="per10k">-</div><div class="s" id="per10kUsd">-</div></div>
     </div>
     <div class="grid" style="margin-top:14px">
-      <div><label>全网总积分</label><input id="pTotal" type="number"></div>
+      <div><label>本周全网积分（allocationRoundPoints 合计）</label><input id="pTotal" type="number"></div>
       <div><label>空投总量（枚）</label><input id="pAirdrop" type="number"></div>
       <div><label>开盘解锁比例 %</label><input id="pUnlock" type="number"></div>
       <div><label>价格 USDT（留空 = 实时）</label><input id="pPrice" type="number" step="any" placeholder="实时"></div>
@@ -69,13 +73,13 @@
 
   <div class="card">
     <h2>每周分配轮次 <span class="pill" id="roundsSum"></span></h2>
-    <div class="scroll"><table id="rounds"><thead><tr><th class="l">周</th><th class="l">开始</th><th class="l">结束</th><th>分配积分</th><th>≈ 代币</th><th>≈ U</th></tr></thead><tbody></tbody></table></div>
+    <div class="scroll"><table id="rounds"><thead><tr><th class="l">周</th><th class="l">开始</th><th class="l">结束</th><th>allocationAmount（分配代币）</th><th>≈ U</th></tr></thead><tbody></tbody></table></div>
   </div>
 
   <div class="card">
-    <h2>积分榜（缓存前 1 万名）</h2>
+    <h2>积分榜 <button class="tab on" data-sort="week">周榜</button><button class="tab" data-sort="total">总榜</button> <span class="pill" id="boardNote"></span></h2>
     <div class="row"><input id="q" class="mono" placeholder="搜索地址 / 用户名"></div>
-    <div class="scroll" style="margin-top:10px"><table id="board"><thead><tr><th class="l">排名</th><th class="l">地址</th><th>积分</th><th>占比</th><th>代币总量</th><th>开盘解锁</th><th>总价值 U</th><th>解锁价值 U</th></tr></thead><tbody></tbody></table></div>
+    <div class="scroll" style="margin-top:10px"><table id="board"><thead><tr><th class="l">周排名</th><th class="l">总排名</th><th class="l">用户</th><th>本周积分</th><th>总积分</th><th>本周占比</th><th>可领代币</th><th>开盘解锁</th><th>价值 U</th><th>解锁价值 U</th></tr></thead><tbody></tbody></table></div>
     <div class="pager"><span class="muted" id="pageInfo"></span><button class="ghost" id="prev">上一页</button><button class="ghost" id="next">下一页</button></div>
   </div>
 </div>
@@ -85,7 +89,7 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n, d = 2) => n == null || !isFinite(n) ? '-' : Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
 const usd = (n) => n == null || !isFinite(n) ? '-' : '$' + fmt(n, 2);
 const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
-let S = null, page = 0, lastRows = [];
+let S = null, page = 0, lastRows = [], sort = 'week';
 
 // 前端参数（可改），默认用后端配置
 function params() {
@@ -115,26 +119,36 @@ function renderEconomics() {
 
 function renderRounds() {
   const r = S.rounds, tb = $('rounds').tBodies[0];
-  if (r.error && !r.list.length) { tb.innerHTML = `<tr><td colspan="6" class="err">${r.error}</td></tr>`; $('roundsSum').textContent = ''; return; }
+  if (r.error && !r.list.length) { tb.innerHTML = `<tr><td colspan="5" class="err">${r.error}</td></tr>`; $('roundsSum').textContent = ''; return; }
   const d = (t) => t ? new Date(isNaN(t) ? t : Number(t) * (String(t).length <= 10 ? 1000 : 1)).toLocaleDateString() : '-';
-  tb.innerHTML = r.list.map((x) => { const c = calc(Number(x.allocationAmount)); return `<tr><td>第 ${x.week} 周</td><td class="l">${d(x.startTime)}</td><td class="l">${d(x.endTime)}</td><td>${fmt(Number(x.allocationAmount), 0)}</td><td>${fmt(c.tokens, 0)}</td><td>${usd(c.usd)}</td></tr>`; }).join('')
-    || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
-  $('roundsSum').textContent = r.list.length ? `合计 ${fmt(r.total, 0)} 积分` : '';
+  tb.innerHTML = r.list.map((x) => { const amt = Number(x.allocationAmount), pr = params().price; return `<tr><td>第 ${x.week} 周</td><td class="l">${d(x.startTime)}</td><td class="l">${d(x.endTime)}</td><td>${fmt(amt, 0)}</td><td>${usd(pr ? amt * pr : null)}</td></tr>`; }).join('')
+    || '<tr><td colspan="5" class="muted">暂无数据</td></tr>';
+  $('roundsSum').textContent = r.list.length ? `合计 ${fmt(r.total, 0)}` : '';
 }
 
 let lastResult = null;
-function showResult(points, meta) { lastResult = { points, meta }; rerenderResult(); }
+function showResult(points, meta, user) { lastResult = { points, meta, user }; rerenderResult(); }
+const chg = (n) => !n ? '' : n > 0 ? ` <span class="up">↑${n}</span>` : ` <span class="down">↓${-n}</span>`;
 function rerenderResult() {
   if (!lastResult) return;
-  const { points, meta } = lastResult, c = calc(points);
-  $('result').innerHTML = `
+  const { points, meta, user } = lastResult, c = calc(points);
+  let html = `
     ${meta ? `<div class="muted" style="margin-bottom:8px">${meta}</div>` : ''}
     <div class="grid">
-      <div class="stat"><div class="k">积分</div><div class="v">${fmt(points, 2)}</div><div class="s">占全网 ${fmt(c.share * 100, 4)}%</div></div>
+      <div class="stat"><div class="k">本周积分</div><div class="v">${fmt(points, 2)}</div><div class="s">占本周全网 ${fmt(c.share * 100, 4)}%</div></div>
       <div class="stat"><div class="k">可领代币总量</div><div class="v accent">${fmt(c.tokens, 2)}</div><div class="s">≈ ${usd(c.usd)}</div></div>
       <div class="stat"><div class="k">开盘解锁 ${fmt(params().unlock * 100, 0)}%</div><div class="v ok">${fmt(c.unlocked, 2)}</div><div class="s">≈ ${usd(c.unlockedUsd)}</div></div>
       <div class="stat"><div class="k">锁仓部分</div><div class="v">${fmt(c.tokens - c.unlocked, 2)}</div><div class="s">≈ ${usd(c.usd == null ? null : c.usd - c.unlockedUsd)}</div></div>
     </div>`;
+  if (user && user.weekly && user.weekly.length) {
+    const w = user.weekly.filter((x) => x.points > 0 || x.referral > 0).reverse();
+    const max = Math.max(...w.map((x) => x.points), 1);
+    html += `<h2 style="margin-top:18px">每周积分 <span class="pill">${w.length} 周有积分 · 累计 ${fmt(user.weekly.reduce((s, x) => s + x.points, 0), 0)}</span></h2>
+      <div class="scroll"><table><thead><tr><th class="l">周</th><th>积分</th><th>其中邀请</th><th class="l" style="width:35%"></th><th>按当前比例≈代币</th><th>≈ U</th></tr></thead><tbody>
+      ${w.map((x) => { const k = calc(x.points); return `<tr><td>第 ${x.week} 周${x.calculated ? '' : ' <span class="pill">统计中</span>'}</td><td>${fmt(x.points, 2)}</td><td>${fmt(x.referral, 2)}</td><td class="l"><div class="bar" style="width:${(x.points / max * 100).toFixed(1)}%"></div></td><td>${fmt(k.tokens, 0)}</td><td>${usd(k.usd)}</td></tr>`; }).join('')}
+      </tbody></table></div>`;
+  }
+  $('result').innerHTML = html;
 }
 
 async function lookup() {
@@ -144,11 +158,14 @@ async function lookup() {
   const r = await fetch('/api/lookup?address=' + encodeURIComponent(a));
   const j = await r.json();
   if (!r.ok) { $('result').innerHTML = `<span class="err">${j.error}</span>`; return; }
-  showResult(j.points, `<span class="mono">${j.address}</span> · 排名 #${j.rank}${j.name ? ' · ' + j.name : ''}`);
+  const who = `${j.name ? '<b>' + esc(j.name) + '</b> · ' : ''}<span class="mono">${j.displayAddress || j.address}</span>${j.twitter ? ' · @' + esc(j.twitter) : ''}`;
+  const ranks = `总榜 #${j.rank ?? '-'}${chg(j.rankChange)} · 总积分 ${fmt(j.totalPoints, 0)}${j.weekRank ? ' · 周榜 #' + j.weekRank + '（缓存内）' : ''}${j.source === 'cache' ? ' · <span class="err">实时查询失败，显示缓存</span>' : ''}`;
+  showResult(j.weekPoints, who + '<br>' + ranks, j);
 }
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 async function loadBoard() {
-  const r = await fetch(`/api/leaderboard?page=${page}&size=50&q=${encodeURIComponent($('q').value.trim())}`);
+  const r = await fetch(`/api/leaderboard?sort=${sort}&page=${page}&size=50&q=${encodeURIComponent($('q').value.trim())}`);
   const j = await r.json();
   lastRows = j.rows; renderBoard(lastRows);
   const pages = Math.max(1, Math.ceil(j.total / j.size));
@@ -157,14 +174,15 @@ async function loadBoard() {
 }
 function renderBoard(rows) {
   const tb = $('board').tBodies[0];
-  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="muted">${S && S.leaderboard.error ? '<span class="err">' + S.leaderboard.error + '</span>' : (S && S.leaderboard.refreshing ? '正在抓取积分榜…' : '暂无数据')}</td></tr>`; return; }
-  tb.innerHTML = rows.map((x) => { const c = calc(x.points); return `<tr><td>#${x.rank}</td><td class="l mono" title="${x.address}"><a href="#" data-a="${x.address}" style="color:inherit">${x.name ? x.name + ' · ' : ''}${short(x.address)}</a></td><td>${fmt(x.points, 0)}</td><td>${fmt(c.share * 100, 4)}%</td><td>${fmt(c.tokens, 0)}</td><td>${fmt(c.unlocked, 0)}</td><td>${usd(c.usd)}</td><td>${usd(c.unlockedUsd)}</td></tr>`; }).join('');
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="10" class="muted">${S && S.leaderboard.error ? '<span class="err">' + esc(S.leaderboard.error) + '</span>' : (S && S.leaderboard.refreshing ? '正在抓取积分榜…' : '暂无数据')}</td></tr>`; return; }
+  tb.innerHTML = rows.map((x) => { const c = calc(x.weekPoints); return `<tr><td>#${x.weekRank}</td><td class="l">#${x.rank ?? '-'}${chg(x.rankChange)}</td><td class="l mono" title="${x.address}"><a href="#" data-a="${x.address}" style="color:inherit">${x.name ? esc(x.name) + ' · ' : ''}${short(x.address)}</a></td><td>${fmt(x.weekPoints, 0)}</td><td class="muted">${fmt(x.totalPoints, 0)}</td><td>${fmt(c.share * 100, 4)}%</td><td>${fmt(c.tokens, 0)}</td><td>${fmt(c.unlocked, 0)}</td><td>${usd(c.usd)}</td><td>${usd(c.unlockedUsd)}</td></tr>`; }).join('');
 }
 
 async function loadSummary() {
   const r = await fetch('/api/summary'); S = await r.json();
   const lb = S.leaderboard;
   $('status').innerHTML = lb.refreshing ? '积分榜抓取中…' : lb.error ? `<span class="err">积分榜：${lb.error}</span>` : `积分榜缓存 ${lb.count} 条 · 更新于 ${lb.updatedAt ? new Date(lb.updatedAt).toLocaleString() : '-'}`;
+  $('boardNote').textContent = lb.count ? `缓存总榜前 ${lb.count} 名 · 其本周积分合计 ${fmt(lb.cachedWeekPointsSum, 0)}` : '';
   for (const [id, v] of [['pTotal', S.economics.totalPoints], ['pAirdrop', S.economics.airdropTokens], ['pUnlock', S.economics.unlockRatio * 100]]) if ($(id).value === '') $(id).placeholder = v;
   renderEconomics();
 }
@@ -175,6 +193,7 @@ $('btnManual').onclick = () => { const v = Number($('manualPts').value); if (v >
 $('manualPts').onkeydown = (e) => e.key === 'Enter' && $('btnManual').onclick();
 ['pTotal', 'pAirdrop', 'pUnlock', 'pPrice'].forEach((id) => $(id).oninput = () => S && renderEconomics());
 let t; $('q').oninput = () => { clearTimeout(t); t = setTimeout(() => { page = 0; loadBoard(); }, 250); };
+document.querySelectorAll('.tab').forEach((b) => b.onclick = () => { document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('on', x === b)); sort = b.dataset.sort; page = 0; loadBoard(); });
 $('prev').onclick = () => { page--; loadBoard(); };
 $('next').onclick = () => { page++; loadBoard(); };
 $('board').onclick = (e) => { const a = e.target.closest('a[data-a]'); if (a) { e.preventDefault(); $('addr').value = a.dataset.a; lookup(); scrollTo({ top: 0, behavior: 'smooth' }); } };
