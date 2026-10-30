@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PREDICT 空投计算器</title>
+<style>
+  :root { --bg:#0e1117; --card:#161b22; --line:#2a313c; --text:#e6edf3; --muted:#8b949e; --accent:#f0b90b; --green:#3fb950; --red:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; } h1 span { color:var(--accent); }
+  h2 { font-size:16px; margin:0 0 12px; }
+  .sub { color:var(--muted); margin-bottom:20px; }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .stat .k { color:var(--muted); font-size:12px; } .stat .v { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .stat .v.accent { color:var(--accent); } .stat .s { color:var(--muted); font-size:12px; }
+  input { background:#0d1117; border:1px solid var(--line); color:var(--text); border-radius:8px; padding:10px 12px; font-size:14px; width:100%; }
+  input:focus { outline:none; border-color:var(--accent); }
+  button { background:var(--accent); color:#000; border:0; border-radius:8px; padding:10px 18px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); }
+  .row { display:flex; gap:8px; } .row > input { flex:1; }
+  label { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; font-size:12px; } th:first-child, td:first-child, td.l, th.l { text-align:left; }
+  .scroll { overflow-x:auto; }
+  .muted { color:var(--muted); } .err { color:var(--red); } .ok { color:var(--green); }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+  #result { margin-top:14px; }
+  .pager { display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:10px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:99px; background:#21262d; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span>PREDICT</span> 空投计算器</h1>
+  <div class="sub">积分 → 代币数量 → U 价值 · 价格来自币安合约 PREDICTUSDT · <span id="status" class="muted">加载中…</span></div>
+
+  <div class="card">
+    <h2>每 1 积分能领多少</h2>
+    <div class="grid">
+      <div class="stat"><div class="k">每积分 代币总量</div><div class="v accent" id="perPoint">-</div><div class="s" id="perPointUsd">-</div></div>
+      <div class="stat"><div class="k">每积分 开盘解锁</div><div class="v" id="perPointUnlock">-</div><div class="s" id="perPointUnlockUsd">-</div></div>
+      <div class="stat"><div class="k">PREDICT 价格</div><div class="v" id="price">-</div><div class="s" id="priceSrc">-</div></div>
+      <div class="stat"><div class="k">每 1 万积分</div><div class="v" id="per10k">-</div><div class="s" id="per10kUsd">-</div></div>
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div><label>全网总积分</label><input id="pTotal" type="number"></div>
+      <div><label>空投总量（枚）</label><input id="pAirdrop" type="number"></div>
+      <div><label>开盘解锁比例 %</label><input id="pUnlock" type="number"></div>
+      <div><label>价格 USDT（留空 = 实时）</label><input id="pPrice" type="number" step="any" placeholder="实时"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>查询地址</h2>
+    <div class="row">
+      <input id="addr" class="mono" placeholder="输入钱包地址 0x...">
+      <button id="btnLookup">查询</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="manualPts" type="number" placeholder="或直接输入积分数量">
+      <button class="ghost" id="btnManual">计算</button>
+    </div>
+    <div id="result"></div>
+  </div>
+
+  <div class="card">
+    <h2>每周分配轮次 <span class="pill" id="roundsSum"></span></h2>
+    <div class="scroll"><table id="rounds"><thead><tr><th class="l">周</th><th class="l">开始</th><th class="l">结束</th><th>分配积分</th><th>≈ 代币</th><th>≈ U</th></tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>积分榜（缓存前 1 万名）</h2>
+    <div class="row"><input id="q" class="mono" placeholder="搜索地址 / 用户名"></div>
+    <div class="scroll" style="margin-top:10px"><table id="board"><thead><tr><th class="l">排名</th><th class="l">地址</th><th>积分</th><th>占比</th><th>代币总量</th><th>开盘解锁</th><th>总价值 U</th><th>解锁价值 U</th></tr></thead><tbody></tbody></table></div>
+    <div class="pager"><span class="muted" id="pageInfo"></span><button class="ghost" id="prev">上一页</button><button class="ghost" id="next">下一页</button></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n, d = 2) => n == null || !isFinite(n) ? '-' : Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+const usd = (n) => n == null || !isFinite(n) ? '-' : '$' + fmt(n, 2);
+const short = (a) => a.slice(0, 6) + '…' + a.slice(-4);
+let S = null, page = 0, lastRows = [];
+
+// 前端参数（可改），默认用后端配置
+function params() {
+  const total = Number($('pTotal').value) || S.economics.totalPoints;
+  const airdrop = Number($('pAirdrop').value) || S.economics.airdropTokens;
+  const unlock = ($('pUnlock').value === '' ? S.economics.unlockRatio * 100 : Number($('pUnlock').value)) / 100;
+  const price = $('pPrice').value !== '' ? Number($('pPrice').value) : S.price.value;
+  return { total, airdrop, unlock, price, perPoint: airdrop / total };
+}
+function calc(points) {
+  const p = params(), tokens = points * p.perPoint, unlocked = tokens * p.unlock;
+  return { tokens, unlocked, usd: p.price ? tokens * p.price : null, unlockedUsd: p.price ? unlocked * p.price : null, share: points / p.total };
+}
+
+function renderEconomics() {
+  const p = params();
+  $('perPoint').textContent = fmt(p.perPoint, 4) + ' 枚';
+  $('perPointUsd').textContent = p.price ? '≈ ' + usd(p.perPoint * p.price) + ' / 积分' : '无价格';
+  $('perPointUnlock').textContent = fmt(p.perPoint * p.unlock, 4) + ' 枚';
+  $('perPointUnlockUsd').textContent = p.price ? '≈ ' + usd(p.perPoint * p.unlock * p.price) + ' / 积分' : '无价格';
+  $('price').textContent = p.price ? '$' + fmt(p.price, 5) : '-';
+  $('priceSrc').textContent = $('pPrice').value !== '' ? '手动价格' : (S.price.value ? S.price.source + ' · ' + new Date(S.price.updatedAt).toLocaleTimeString() : (S.price.error || '获取失败'));
+  $('per10k').textContent = fmt(p.perPoint * 1e4, 0) + ' 枚';
+  $('per10kUsd').textContent = p.price ? '≈ ' + usd(p.perPoint * 1e4 * p.price) + '（解锁 ' + usd(p.perPoint * 1e4 * p.unlock * p.price) + '）' : '';
+  renderRounds(); renderBoard(lastRows); rerenderResult();
+}
+
+function renderRounds() {
+  const r = S.rounds, tb = $('rounds').tBodies[0];
+  if (r.error && !r.list.length) { tb.innerHTML = `<tr><td colspan="6" class="err">${r.error}</td></tr>`; $('roundsSum').textContent = ''; return; }
+  const d = (t) => t ? new Date(isNaN(t) ? t : Number(t) * (String(t).length <= 10 ? 1000 : 1)).toLocaleDateString() : '-';
+  tb.innerHTML = r.list.map((x) => { const c = calc(Number(x.allocationAmount)); return `<tr><td>第 ${x.week} 周</td><td class="l">${d(x.startTime)}</td><td class="l">${d(x.endTime)}</td><td>${fmt(Number(x.allocationAmount), 0)}</td><td>${fmt(c.tokens, 0)}</td><td>${usd(c.usd)}</td></tr>`; }).join('')
+    || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
+  $('roundsSum').textContent = r.list.length ? `合计 ${fmt(r.total, 0)} 积分` : '';
+}
+
+let lastResult = null;
+function showResult(points, meta) { lastResult = { points, meta }; rerenderResult(); }
+function rerenderResult() {
+  if (!lastResult) return;
+  const { points, meta } = lastResult, c = calc(points);
+  $('result').innerHTML = `
+    ${meta ? `<div class="muted" style="margin-bottom:8px">${meta}</div>` : ''}
+    <div class="grid">
+      <div class="stat"><div class="k">积分</div><div class="v">${fmt(points, 2)}</div><div class="s">占全网 ${fmt(c.share * 100, 4)}%</div></div>
+      <div class="stat"><div class="k">可领代币总量</div><div class="v accent">${fmt(c.tokens, 2)}</div><div class="s">≈ ${usd(c.usd)}</div></div>
+      <div class="stat"><div class="k">开盘解锁 ${fmt(params().unlock * 100, 0)}%</div><div class="v ok">${fmt(c.unlocked, 2)}</div><div class="s">≈ ${usd(c.unlockedUsd)}</div></div>
+      <div class="stat"><div class="k">锁仓部分</div><div class="v">${fmt(c.tokens - c.unlocked, 2)}</div><div class="s">≈ ${usd(c.usd == null ? null : c.usd - c.unlockedUsd)}</div></div>
+    </div>`;
+}
+
+async function lookup() {
+  const a = $('addr').value.trim();
+  if (!a) return;
+  $('result').innerHTML = '<span class="muted">查询中…</span>'; lastResult = null;
+  const r = await fetch('/api/lookup?address=' + encodeURIComponent(a));
+  const j = await r.json();
+  if (!r.ok) { $('result').innerHTML = `<span class="err">${j.error}</span>`; return; }
+  showResult(j.points, `<span class="mono">${j.address}</span> · 排名 #${j.rank}${j.name ? ' · ' + j.name : ''}`);
+}
+
+async function loadBoard() {
+  const r = await fetch(`/api/leaderboard?page=${page}&size=50&q=${encodeURIComponent($('q').value.trim())}`);
+  const j = await r.json();
+  lastRows = j.rows; renderBoard(lastRows);
+  const pages = Math.max(1, Math.ceil(j.total / j.size));
+  $('pageInfo').textContent = `第 ${page + 1} / ${pages} 页 · 共 ${j.total} 条`;
+  $('prev').disabled = page <= 0; $('next').disabled = page + 1 >= pages;
+}
+function renderBoard(rows) {
+  const tb = $('board').tBodies[0];
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="muted">${S && S.leaderboard.error ? '<span class="err">' + S.leaderboard.error + '</span>' : (S && S.leaderboard.refreshing ? '正在抓取积分榜…' : '暂无数据')}</td></tr>`; return; }
+  tb.innerHTML = rows.map((x) => { const c = calc(x.points); return `<tr><td>#${x.rank}</td><td class="l mono" title="${x.address}"><a href="#" data-a="${x.address}" style="color:inherit">${x.name ? x.name + ' · ' : ''}${short(x.address)}</a></td><td>${fmt(x.points, 0)}</td><td>${fmt(c.share * 100, 4)}%</td><td>${fmt(c.tokens, 0)}</td><td>${fmt(c.unlocked, 0)}</td><td>${usd(c.usd)}</td><td>${usd(c.unlockedUsd)}</td></tr>`; }).join('');
+}
+
+async function loadSummary() {
+  const r = await fetch('/api/summary'); S = await r.json();
+  const lb = S.leaderboard;
+  $('status').innerHTML = lb.refreshing ? '积分榜抓取中…' : lb.error ? `<span class="err">积分榜：${lb.error}</span>` : `积分榜缓存 ${lb.count} 条 · 更新于 ${lb.updatedAt ? new Date(lb.updatedAt).toLocaleString() : '-'}`;
+  for (const [id, v] of [['pTotal', S.economics.totalPoints], ['pAirdrop', S.economics.airdropTokens], ['pUnlock', S.economics.unlockRatio * 100]]) if ($(id).value === '') $(id).placeholder = v;
+  renderEconomics();
+}
+
+$('btnLookup').onclick = lookup;
+$('addr').onkeydown = (e) => e.key === 'Enter' && lookup();
+$('btnManual').onclick = () => { const v = Number($('manualPts').value); if (v > 0) showResult(v, '手动输入'); };
+$('manualPts').onkeydown = (e) => e.key === 'Enter' && $('btnManual').onclick();
+['pTotal', 'pAirdrop', 'pUnlock', 'pPrice'].forEach((id) => $(id).oninput = () => S && renderEconomics());
+let t; $('q').oninput = () => { clearTimeout(t); t = setTimeout(() => { page = 0; loadBoard(); }, 250); };
+$('prev').onclick = () => { page--; loadBoard(); };
+$('next').onclick = () => { page++; loadBoard(); };
+$('board').onclick = (e) => { const a = e.target.closest('a[data-a]'); if (a) { e.preventDefault(); $('addr').value = a.dataset.a; lookup(); scrollTo({ top: 0, behavior: 'smooth' }); } };
+
+loadSummary().then(loadBoard);
+setInterval(() => loadSummary().then(() => { if (!lastRows.length) loadBoard(); }), 15000);
+</script>
+</body>
+</html>
